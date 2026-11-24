@@ -54,10 +54,16 @@ final class Transcriber {
     }
 
     private(set) var phase: Phase = .needsSetup
-    /// True from the start of a download until that model has loaded, so the setup screen stays up through both.
+    /// True from the start of a first-run download until that model has loaded, so the setup screen stays up through both.
     private(set) var isInstalling = false
     private(set) var activeRecordingId: Int64?
     private(set) var activeProgress: Double = 0
+    private(set) var currentModelId: String?
+    /// Model id -> folder for every fully downloaded model.
+    private(set) var downloadedModels: [String: String] = [:]
+    /// Progress of downloads in flight, by model id.
+    private(set) var downloadProgress: [String: Double] = [:]
+    private(set) var downloadErrors: [String: String] = [:]
 
     private let library: Library
     private let modelsDirectory: URL
@@ -66,29 +72,54 @@ final class Transcriber {
     @ObservationIgnored private var worker: Task<Void, Never>?
     @ObservationIgnored private var activeCancelFlag: CancelFlag?
 
-    private static let savedFolderKey = "modelFolder"
-    private static let savedModelKey = "modelId"
+    private static let currentModelKey = "modelId"
+    private static let downloadedModelsKey = "downloadedModels"
+    private static let legacyFolderKey = "modelFolder"
 
-    var installedModel: ModelOption? {
-        let id = defaults.string(forKey: Self.savedModelKey)
-        return ModelOption.all.first { $0.id == id }
+    var currentModel: ModelOption? {
+        ModelOption.all.first { $0.id == currentModelId }
     }
 
-    init(library: Library, modelsDirectory: URL = AppPaths.models, defaults: UserDefaults = .standard) {
+    init(library: Library, modelsDirectory: URL = AppPaths.models, defaults: UserDefaults = AppPaths.defaults) {
         self.library = library
         self.modelsDirectory = modelsDirectory
         self.defaults = defaults
-        if let folder = defaults.string(forKey: Self.savedFolderKey),
-           FileManager.default.fileExists(atPath: folder) {
+
+        var downloaded = defaults.dictionary(forKey: Self.downloadedModelsKey) as? [String: String] ?? [:]
+        let savedId = defaults.string(forKey: Self.currentModelKey)
+        if let savedId, let legacyFolder = defaults.string(forKey: Self.legacyFolderKey), downloaded[savedId] == nil {
+            downloaded[savedId] = legacyFolder
+        }
+        downloadedModels = downloaded.filter { FileManager.default.fileExists(atPath: $0.value) }
+        defaults.set(downloadedModels, forKey: Self.downloadedModelsKey)
+
+        if let savedId, let folder = downloadedModels[savedId] {
+            currentModelId = savedId
             Task { await load(folder: folder) }
         }
     }
 
-    /// Downloads the model (the app's only network access) and loads it. The tokenizer is also fetched
-    /// during this first load and cached next to the models, so later launches work offline.
+    // MARK: Models
+
+    /// First-run setup: download a model, then switch to it. The setup screen follows `phase` throughout.
     func install(_ option: ModelOption) async {
         isInstalling = true
         phase = .downloading(0)
+        guard await download(option) else {
+            phase = .failed(downloadErrors[option.id] ?? "Download failed")
+            return
+        }
+        await use(option)
+    }
+
+    /// Downloads a model without switching to it. This is the app's only network access; the tokenizer
+    /// is fetched on the model's first load and cached next to it, so later launches work offline.
+    @discardableResult
+    func download(_ option: ModelOption) async -> Bool {
+        guard downloadProgress[option.id] == nil else { return false }
+        downloadProgress[option.id] = 0
+        downloadErrors[option.id] = nil
+        defer { downloadProgress[option.id] = nil }
         do {
             let folder = try await WhisperKit.download(
                 variant: option.id,
@@ -96,28 +127,45 @@ final class Transcriber {
                 progressCallback: { progress in
                     let fraction = progress.fractionCompleted
                     Task { @MainActor [weak self] in
-                        guard let self, case .downloading = self.phase else { return }
-                        self.phase = .downloading(fraction)
+                        guard let self, self.downloadProgress[option.id] != nil else { return }
+                        self.downloadProgress[option.id] = fraction
+                        if case .downloading = self.phase { self.phase = .downloading(fraction) }
                     }
                 }
             )
-            defaults.set(folder.path, forKey: Self.savedFolderKey)
-            defaults.set(option.id, forKey: Self.savedModelKey)
-            await load(folder: folder.path)
+            downloadedModels[option.id] = folder.path
+            defaults.set(downloadedModels, forKey: Self.downloadedModelsKey)
+            return true
         } catch {
-            phase = .failed("Download failed: \(error.localizedDescription)")
+            downloadErrors[option.id] = "Download failed: \(error.localizedDescription)"
+            return false
         }
     }
 
-    func resetModel() {
-        cancelActive()
-        worker?.cancel()
+    /// Switches to a downloaded model. A transcription in progress is restarted with the new model.
+    func use(_ option: ModelOption) async {
+        guard let folder = downloadedModels[option.id] else { return }
+        if let active = activeRecordingId {
+            cancelActive()
+            library.requeue(active)
+        }
         whisper = nil
-        phase = .needsSetup
+        currentModelId = option.id
+        defaults.set(option.id, forKey: Self.currentModelKey)
+        await load(folder: folder)
+    }
+
+    /// Frees disk space. The model in use can't be deleted.
+    func deleteModel(_ option: ModelOption) {
+        guard option.id != currentModelId, let folder = downloadedModels[option.id] else { return }
+        try? FileManager.default.removeItem(atPath: folder)
+        downloadedModels[option.id] = nil
+        defaults.set(downloadedModels, forKey: Self.downloadedModelsKey)
     }
 
     private func load(folder: String) async {
         phase = .loading
+        let modelId = currentModelId
         do {
             let config = WhisperKitConfig(
                 modelFolder: folder,
@@ -128,12 +176,27 @@ final class Transcriber {
                 load: true,
                 download: false
             )
-            whisper = try await WhisperKit(config)
+            let loaded = try await WhisperKit(config)
+            // Another switch may have started while this model was loading; the newest choice wins.
+            guard modelId == currentModelId else { return }
+            whisper = loaded
             phase = .ready
             isInstalling = false
             processQueue()
         } catch {
+            guard modelId == currentModelId else { return }
             phase = .failed("Couldn't load the model: \(error.localizedDescription)")
+        }
+    }
+
+    /// Drops Whisper's non-speech annotations (e.g. "[BLANK_AUDIO]", "(music)") and clamps times to the audio length.
+    nonisolated static func cleanSegments(_ raw: [(start: Double, end: Double, text: String)], duration: Double) -> [(start: Double, end: Double, text: String)] {
+        raw.sorted { $0.start < $1.start }.compactMap { segment in
+            let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isAnnotation = text.range(of: #"^(\[[^\]]*\]|\([^)]*\)|\*[^*]*\*)$"#, options: .regularExpression) != nil
+            guard !text.isEmpty, !isAnnotation else { return nil }
+            let end = duration > 0 ? min(segment.end, duration) : segment.end
+            return (segment.start, max(end, segment.start), text)
         }
     }
 
@@ -199,14 +262,10 @@ final class Transcriber {
             )
             guard !flag.isCancelled else { return }
 
-            let segments = results
-                .flatMap(\.segments)
-                .sorted { $0.start < $1.start }
-                .compactMap { segment -> (start: Double, end: Double, text: String)? in
-                    let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !text.isEmpty else { return nil }
-                    return (Double(segment.start), Double(segment.end), text)
-                }
+            let segments = Self.cleanSegments(
+                results.flatMap(\.segments).map { (Double($0.start), Double($0.end), $0.text) },
+                duration: recording.duration
+            )
             library.saveTranscript(for: id, segments: segments, language: results.first?.language)
         } catch {
             guard !flag.isCancelled else { return }

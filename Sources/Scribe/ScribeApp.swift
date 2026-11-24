@@ -1,11 +1,63 @@
+import AppKit
 import SwiftUI
+
+/// Receives files opened from Finder ("Open With", or dropped on the Dock icon) and holds them until the main window can import them.
+@Observable
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    @ObservationIgnored var importHandler: (([URL]) -> Void)? {
+        didSet { deliverPending() }
+    }
+    @ObservationIgnored private var pending: [URL] = []
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        pending += urls
+        deliverPending()
+    }
+
+    private func deliverPending() {
+        guard let importHandler, !pending.isEmpty else { return }
+        let urls = pending
+        pending = []
+        importHandler(urls)
+    }
+}
+
+/// Asks the detail view to jump to a moment in a recording (from a search result).
+struct SeekRequest: Equatable {
+    let recordingId: Int64
+    let time: Double
+    let segmentId: Int64?
+    let token = UUID()
+}
+
+/// Window-level navigation state, shared with menu commands.
+@Observable
+@MainActor
+final class AppState {
+    var selection: Int64?
+    var searchText = ""
+    var seekRequest: SeekRequest?
+    var showImporter = false
+    var showModelPicker = false
+
+    func selectAdjacent(_ offset: Int, in recordings: [Recording]) {
+        guard !recordings.isEmpty else { return }
+        guard let current = recordings.firstIndex(where: { $0.id == selection }) else {
+            selection = recordings.first?.id
+            return
+        }
+        let next = min(max(current + offset, 0), recordings.count - 1)
+        selection = recordings[next].id
+    }
+}
 
 @main
 struct ScribeApp: App {
+    @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
     @State private var library: Library
     @State private var transcriber: Transcriber
     @State private var player = Player()
-    @State private var showImporter = false
+    @State private var appState = AppState()
 
     init() {
         let library: Library
@@ -20,22 +72,34 @@ struct ScribeApp: App {
 
     var body: some Scene {
         Window("Scribe", id: "main") {
-            RootView(showImporter: $showImporter)
+            RootView()
                 .environment(library)
                 .environment(transcriber)
                 .environment(player)
-                .frame(minWidth: 820, minHeight: 520)
+                .environment(appState)
+                .environment(appDelegate)
+                .tint(.brand)
+                .foregroundStyle(Theme.text)
+                .frame(minWidth: 860, minHeight: 560)
         }
-        .defaultSize(width: 1100, height: 720)
+        .windowStyle(.hiddenTitleBar)
+        .windowBackgroundDragBehavior(.enabled)
+        .defaultSize(width: 1180, height: 760)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("Import Audio…") { showImporter = true }
-                    .keyboardShortcut("o")
+                Button("New Transcript…") { appState.showImporter = true }
+                    .keyboardShortcut("n")
                     .disabled(transcriber.phase == .needsSetup || transcriber.isInstalling)
             }
             CommandGroup(after: .appSettings) {
-                Button("Change Speech Model…") { transcriber.resetModel() }
-                    .disabled(transcriber.isInstalling)
+                Button("Speech Models…") { appState.showModelPicker = true }
+                    .disabled(transcriber.phase == .needsSetup || transcriber.isInstalling)
+            }
+            CommandMenu("Go") {
+                Button("Previous Recording") { appState.selectAdjacent(-1, in: library.recordings) }
+                    .keyboardShortcut("[")
+                Button("Next Recording") { appState.selectAdjacent(1, in: library.recordings) }
+                    .keyboardShortcut("]")
             }
             CommandMenu("Playback") {
                 Button(player.isPlaying ? "Pause" : "Play") { player.togglePlay() }
@@ -50,14 +114,16 @@ struct ScribeApp: App {
 }
 
 struct RootView: View {
-    @Binding var showImporter: Bool
     @Environment(Transcriber.self) private var transcriber
 
     var body: some View {
-        if transcriber.phase == .needsSetup || transcriber.isInstalling {
-            SetupView()
-        } else {
-            MainView(showImporter: $showImporter)
+        Group {
+            if transcriber.phase == .needsSetup || transcriber.isInstalling {
+                SetupView()
+            } else {
+                MainView()
+            }
         }
+        .background(Theme.canvas)
     }
 }

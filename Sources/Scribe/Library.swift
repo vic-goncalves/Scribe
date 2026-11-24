@@ -4,11 +4,17 @@ import GRDB
 import Observation
 
 enum AppPaths {
-    static let root: URL = {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("Scribe", isDirectory: true)
-    }()
+    /// SCRIBE_ROOT points the app at a separate library, models folder and settings, for development and demos.
+    private static let developmentRoot = ProcessInfo.processInfo.environment["SCRIBE_ROOT"]
+        .map { URL(fileURLWithPath: $0, isDirectory: true) }
+
+    static let root: URL = developmentRoot ?? FileManager.default
+        .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("Scribe", isDirectory: true)
     static let models = root.appendingPathComponent("Models", isDirectory: true)
+    static let defaults: UserDefaults = developmentRoot == nil
+        ? .standard
+        : UserDefaults(suiteName: "com.vicgoncalves.scribe.dev") ?? .standard
 }
 
 struct Recording: Codable, Identifiable, Hashable, FetchableRecord, MutablePersistableRecord {

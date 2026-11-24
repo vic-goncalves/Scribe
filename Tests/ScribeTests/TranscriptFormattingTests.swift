@@ -19,18 +19,18 @@ final class TranscriptFormattingTests: XCTestCase {
 
     func testParagraphsBreakAtSentenceEndOnceLongEnough() {
         let paragraphs = Paragraph.group([
-            segment(1, 0, 10, "Short sentence."),
-            segment(2, 10, 20, "Not long enough yet."),
-            segment(3, 20.5, 27.5, "Now it is."),
-            segment(4, 28, 30, "New paragraph"),
+            segment(1, 0, 6, "Short sentence."),
+            segment(2, 6, 12, "Not long enough yet."),
+            segment(3, 12.2, 17, "Now it is."),
+            segment(4, 17.2, 20, "New paragraph"),
         ])
         XCTAssertEqual(paragraphs.map(\.segments.count), [3, 1])
     }
 
-    func testParagraphsBreakAfterAMinuteEvenMidSentence() {
+    func testParagraphsBreakAfterFortySecondsEvenMidSentence() {
         let segments = (0..<20).map { segment(Int64($0), Double($0) * 5, Double($0) * 5 + 5, "and then") }
         let paragraphs = Paragraph.group(segments)
-        XCTAssertEqual(paragraphs.map(\.start), [0, 60])
+        XCTAssertEqual(paragraphs.map(\.start), [0, 40, 80])
     }
 
     func testTimestamps() {
@@ -59,5 +59,18 @@ final class TranscriptFormattingTests: XCTestCase {
         let reopened = try NSAttributedString(data: docx, options: [.documentType: NSAttributedString.DocumentType.officeOpenXML], documentAttributes: nil)
         XCTAssertTrue(reopened.string.contains("Standup"))
         XCTAssertTrue(reopened.string.contains("1:01\nAny blockers?"))
+    }
+
+    func testCleanSegmentsDropsAnnotationsAndClampsToDuration() {
+        let cleaned = Transcriber.cleanSegments([
+            (5, 9, " second "),
+            (0, 4, "First (laughs) part."),
+            (9, 10, "[BLANK_AUDIO]"),
+            (10, 11, "(music)"),
+            (11, 12, " "),
+            (12, 20, "Last words."),
+        ], duration: 15)
+        XCTAssertEqual(cleaned.map(\.text), ["First (laughs) part.", "second", "Last words."])
+        XCTAssertEqual(cleaned.last?.end, 15)
     }
 }

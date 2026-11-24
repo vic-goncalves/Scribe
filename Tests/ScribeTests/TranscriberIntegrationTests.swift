@@ -51,7 +51,8 @@ final class TranscriberIntegrationTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(250))
         }
         XCTAssertEqual(relaunched.phase, .ready)
-        XCTAssertEqual(relaunched.installedModel, fast)
+        XCTAssertEqual(relaunched.currentModel, fast)
+        XCTAssertEqual(Set(relaunched.downloadedModels.keys), [fast.id])
     }
 
     private func synthesizeSpeech(_ text: String, to url: URL) throws -> URL {

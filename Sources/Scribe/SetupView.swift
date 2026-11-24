@@ -5,32 +5,38 @@ struct SetupView: View {
     @State private var choice = ModelOption.recommended
 
     var body: some View {
-        VStack(spacing: 28) {
-            VStack(spacing: 10) {
-                Image(systemName: "waveform")
-                    .font(.system(size: 44, weight: .medium))
-                    .foregroundStyle(.tint)
+        VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text("Welcome to Scribe")
-                    .font(.largeTitle.weight(.semibold))
-                Text("Scribe turns recordings into searchable transcripts, entirely on this Mac. It needs a speech model first. That's a one-time download, and after it nothing leaves your computer.")
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 28, weight: .bold))
+                Text("Scribe transcribes audio entirely on this Mac. Choose a speech model to download. It's a one-time download, and after that everything works offline.")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Theme.secondaryText)
+                    .lineSpacing(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            VStack(spacing: 8) {
-                ForEach(ModelOption.all) { option in
-                    ModelOptionCard(option: option, isSelected: option == choice) { choice = option }
+            VStack(spacing: 0) {
+                ForEach(Array(ModelOption.all.enumerated()), id: \.element.id) { index, option in
+                    if index > 0 {
+                        Rectangle().fill(Theme.border).frame(height: 1)
+                    }
+                    ModelChoiceRow(option: option, isSelected: option == choice) { choice = option }
                 }
             }
+            .background(RoundedRectangle(cornerRadius: 10).fill(Theme.elevated))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.border, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
             .disabled(isBusy)
 
             status
-                .frame(height: 56)
+                .frame(height: 44, alignment: .top)
         }
-        .padding(40)
+        .padding(48)
         .frame(maxWidth: 560)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.canvas)
+        .ignoresSafeArea()
     }
 
     private var isBusy: Bool {
@@ -44,34 +50,33 @@ struct SetupView: View {
     private var status: some View {
         switch transcriber.phase {
         case .downloading(let fraction):
-            VStack(spacing: 8) {
-                ProgressView(value: fraction)
+            VStack(alignment: .leading, spacing: 8) {
+                ProgressBar(value: fraction > 0 ? fraction : nil)
                 Text("Downloading \(choice.name) model · \(Int(fraction * 100))% of \(choice.size)")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Theme.secondaryText)
                     .monospacedDigit()
             }
         case .loading:
-            VStack(spacing: 8) {
+            HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text("Optimizing the model for your Mac. The first time can take a few minutes.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                Text("Preparing the model for your Mac. The first time can take a few minutes.")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Theme.secondaryText)
             }
         case .failed(let message):
-            VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                downloadButton(title: "Try again")
                 Text(message)
-                    .font(.callout)
+                    .font(.system(size: 12.5))
                     .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
-                downloadButton(title: "Try Again")
             }
         case .needsSetup, .ready:
-            VStack(spacing: 8) {
-                downloadButton(title: "Download and Continue")
-                Text("Stored in ~/Library/Application Support/Scribe")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+            HStack(spacing: 12) {
+                downloadButton(title: "Download and continue")
+                Text("You can switch models later.")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Theme.tertiaryText)
             }
         }
     }
@@ -80,58 +85,55 @@ struct SetupView: View {
         Button(title) {
             Task { await transcriber.install(choice) }
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
+        .buttonStyle(PrimaryButtonStyle())
         .keyboardShortcut(.defaultAction)
     }
 }
 
-private struct ModelOptionCard: View {
+private struct ModelChoiceRow: View {
     let option: ModelOption
     let isSelected: Bool
     let select: () -> Void
 
+    @State private var isHovered = false
+
     var body: some View {
         Button(action: select) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
-                    .font(.title3)
-                    .foregroundStyle(isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+            HStack(alignment: .center, spacing: 12) {
+                Circle()
+                    .strokeBorder(isSelected ? Color.brand : Theme.tertiaryText.opacity(0.6), lineWidth: isSelected ? 5 : 1.25)
+                    .frame(width: 16, height: 16)
+                    .animation(.easeOut(duration: 0.12), value: isSelected)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
-                        Text(option.name).font(.headline)
+                        Text(option.name)
+                            .font(.system(size: 13.5, weight: .medium))
                         if option == ModelOption.recommended {
                             Text("Recommended")
-                                .font(.caption2.weight(.semibold))
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Theme.secondaryText)
                                 .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(.tint.opacity(0.15), in: Capsule())
-                                .foregroundStyle(.tint)
+                                .padding(.vertical, 1)
+                                .background(RoundedRectangle(cornerRadius: 4).fill(Theme.hover))
                         }
-                        Spacer()
-                        Text(option.size)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
                     }
                     Text(option.summary)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Theme.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                Spacer()
+                Text(option.size)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Theme.tertiaryText)
+                    .monospacedDigit()
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(isSelected ? AnyShapeStyle(.tint.opacity(0.08)) : AnyShapeStyle(.quaternary.opacity(0.5)))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(.clear), lineWidth: 1.5)
-            )
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
+            .background(isHovered ? Theme.hover.opacity(0.6) : .clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
     }
 }

@@ -9,8 +9,8 @@ struct Paragraph: Identifiable {
     var end: Double { segments[segments.count - 1].end }
     var text: String { segments.map(\.text).joined(separator: " ") }
 
-    /// Whisper segments are a few seconds long. Group them into readable paragraphs,
-    /// breaking on long pauses or after a sentence once the paragraph is long enough.
+    /// Whisper segments are a few seconds long. Group them into short, readable paragraphs (which also
+    /// tend to follow turns in a conversation), breaking on pauses or at a sentence end once long enough.
     static func group(_ segments: [Segment]) -> [Paragraph] {
         var paragraphs: [Paragraph] = []
         var current: [Segment] = []
@@ -19,7 +19,7 @@ struct Paragraph: Identifiable {
                 let pause = segment.start - last.end
                 let length = segment.start - first.start
                 let endsSentence = last.text.last.map { ".?!".contains($0) } ?? false
-                if pause >= 2 || length >= 60 || (length >= 25 && endsSentence) {
+                if pause >= 1.5 || length >= 40 || (length >= 15 && endsSentence) {
                     paragraphs.append(Paragraph(segments: current))
                     current = []
                 }
