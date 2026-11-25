@@ -1,7 +1,5 @@
 # Scribe
 
-https://github.com/user-attachments/assets/99663534-4dc5-4a2c-bbe7-f35a4b69ed59
-
 A Mac app that transcribes audio locally with OpenAI's Whisper (via [WhisperKit](https://github.com/argmaxinc/WhisperKit), CoreML on Apple Silicon) and separates speakers with SpeakerKit. Audio and transcripts never leave the machine; the only network access is the one-time download of the speech and speaker models from Hugging Face.
 
 - Drop audio files (mp3, m4a, wav, flac, aiff, caf) anywhere in the window, use "New transcript" (⌘N), or "Open With > Scribe" in Finder.
