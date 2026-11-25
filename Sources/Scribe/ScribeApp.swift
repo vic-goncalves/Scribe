@@ -39,6 +39,10 @@ final class AppState {
     var seekRequest: SeekRequest?
     var showImporter = false
     var showModelPicker = false
+    /// Recording awaiting delete confirmation.
+    var pendingDeletion: Int64?
+    /// Recording whose title should take keyboard focus for renaming.
+    var renameRequest: Int64?
 
     func selectAdjacent(_ offset: Int, in recordings: [Recording]) {
         guard !recordings.isEmpty else { return }
@@ -58,6 +62,7 @@ struct ScribeApp: App {
     @State private var transcriber: Transcriber
     @State private var player = Player()
     @State private var appState = AppState()
+    @AppStorage(AppearanceMode.storageKey) private var appearance = AppearanceMode.system
 
     init() {
         let library: Library
@@ -81,6 +86,7 @@ struct ScribeApp: App {
                 .tint(.brand)
                 .foregroundStyle(Theme.text)
                 .frame(minWidth: 860, minHeight: 560)
+                .onChange(of: appearance, initial: true) { appearance.apply() }
         }
         .windowStyle(.hiddenTitleBar)
         .windowBackgroundDragBehavior(.enabled)
@@ -94,6 +100,14 @@ struct ScribeApp: App {
             CommandGroup(after: .appSettings) {
                 Button("Speech Models…") { appState.showModelPicker = true }
                     .disabled(transcriber.phase == .needsSetup || transcriber.isInstalling)
+            }
+            CommandGroup(before: .sidebar) {
+                Picker("Appearance", selection: $appearance) {
+                    ForEach(AppearanceMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                Divider()
             }
             CommandMenu("Go") {
                 Button("Previous Recording") { appState.selectAdjacent(-1, in: library.recordings) }

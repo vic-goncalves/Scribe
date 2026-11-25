@@ -6,6 +6,40 @@ extension Color {
     static let brand = Color(red: 0.137, green: 0.514, blue: 0.886)
 }
 
+enum AppearanceMode: String, CaseIterable, Identifiable {
+    case system, light, dark
+
+    static let storageKey = "appearance"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .system: "System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .system: "circle.lefthalf.filled"
+        case .light: "sun.max"
+        case .dark: "moon"
+        }
+    }
+
+    /// Applied app-wide so windows, sheets, menus and alerts all match.
+    @MainActor
+    func apply() {
+        NSApp.appearance = switch self {
+        case .system: nil
+        case .light: NSAppearance(named: .aqua)
+        case .dark: NSAppearance(named: .darkAqua)
+        }
+    }
+}
+
 /// Neutral palette: white canvas, soft gray sidebar, warm near-black text. Light and dark variants.
 enum Theme {
     static let canvas = dynamic(light: 0xFFFFFF, dark: 0x191919)

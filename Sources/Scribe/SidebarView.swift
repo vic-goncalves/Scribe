@@ -2,14 +2,11 @@ import SwiftUI
 
 struct SidebarView: View {
     let onImport: () -> Void
-    let onDelete: (Int64) -> Void
 
     @Environment(Library.self) private var library
     @Environment(Transcriber.self) private var transcriber
     @Environment(AppState.self) private var appState
     @State private var hits: [SearchHit] = []
-    @State private var renaming: Recording?
-    @State private var renameText = ""
     @FocusState private var listFocused: Bool
 
     private var isSearching: Bool { !appState.searchText.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -30,8 +27,11 @@ struct SidebarView: View {
                 recordingList
             }
 
-            ModelSwitcherButton()
-                .padding(.bottom, 10)
+            HStack(spacing: 2) {
+                ModelSwitcherButton()
+                AppearanceButton()
+            }
+            .padding(.bottom, 10)
         }
         .padding(.horizontal, 8)
         .background(Theme.sidebar)
@@ -39,13 +39,6 @@ struct SidebarView: View {
             try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled else { return }
             hits = library.search(appState.searchText)
-        }
-        .alert("Rename Recording", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
-            TextField("Title", text: $renameText)
-            Button("Rename") {
-                if let id = renaming?.id { library.rename(id, to: renameText) }
-            }
-            Button("Cancel", role: .cancel) {}
         }
     }
 
@@ -97,9 +90,9 @@ struct SidebarView: View {
     @ViewBuilder
     private func menu(for recording: Recording) -> some View {
         if let id = recording.id {
-            Button("Rename…") {
-                renameText = recording.title
-                renaming = recording
+            Button("Rename") {
+                appState.selection = id
+                appState.renameRequest = id
             }
             Button("Show Audio in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([library.audioURL(for: recording)])
@@ -111,7 +104,7 @@ struct SidebarView: View {
                 }
             }
             Divider()
-            Button("Delete", role: .destructive) { onDelete(id) }
+            Button("Delete…", role: .destructive) { appState.pendingDeletion = id }
         }
     }
 
@@ -356,6 +349,31 @@ private struct SearchHitRow: View {
             }
         }
         return text
+    }
+}
+
+private struct AppearanceButton: View {
+    @AppStorage(AppearanceMode.storageKey) private var appearance = AppearanceMode.system
+
+    var body: some View {
+        Menu {
+            Picker("Appearance", selection: $appearance) {
+                ForEach(AppearanceMode.allCases) { mode in
+                    Label(mode.label, systemImage: mode.icon).tag(mode)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            Image(systemName: appearance.icon)
+                .font(.system(size: 13))
+                .frame(width: 22, height: 30)
+        }
+        .menuStyle(.button)
+        .buttonStyle(GhostButtonStyle())
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Appearance: \(appearance.label)")
     }
 }
 

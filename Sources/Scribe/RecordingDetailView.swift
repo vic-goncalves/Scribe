@@ -25,6 +25,9 @@ struct RecordingDetailView: View {
     @State private var copied = false
     @State private var renamingSpeaker: Int?
     @State private var speakerNameDraft = ""
+    @State private var titleDraft = ""
+    @State private var titleBeforeEditing = ""
+    @FocusState private var titleFocused: Bool
 
     private var speakers: SpeakerLabels { SpeakerLabels(segments: segments, names: speakerNames) }
 
@@ -41,6 +44,14 @@ struct RecordingDetailView: View {
         }
         .task(id: recording.status) {
             reloadTranscript()
+        }
+        .task(id: recording.title) {
+            if !titleFocused { titleDraft = recording.title }
+        }
+        .task(id: appState.renameRequest) {
+            guard appState.renameRequest == recording.id else { return }
+            appState.renameRequest = nil
+            titleFocused = true
         }
         .alert("Rename Speaker", isPresented: Binding(get: { renamingSpeaker != nil }, set: { if !$0 { renamingSpeaker = nil } })) {
             TextField("Name", text: $speakerNameDraft)
@@ -74,37 +85,88 @@ struct RecordingDetailView: View {
     }
 
     private var actionBar: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 8) {
             Text(recording.title)
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.secondaryText)
                 .lineLimit(1)
                 .padding(.leading, 6)
             Spacer()
-            Button(copied ? "Copied" : "Copy", action: copyTranscript)
-            .buttonStyle(GhostButtonStyle())
-            .help("Copy the transcript as plain text")
+            if copied {
+                Text("Copied to clipboard")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Theme.tertiaryText)
+                    .transition(.opacity)
+            }
             Menu {
-                ForEach(ExportFormat.allCases) { format in
-                    Button(format.label) { export(format) }
-                }
+                actions
             } label: {
-                Text("Export")
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 22, height: 20)
             }
             .menuStyle(.button)
             .buttonStyle(GhostButtonStyle())
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("Save the transcript as a file")
+            .help("More actions")
         }
-        .disabled(!hasTranscript)
+        .animation(.easeOut(duration: 0.2), value: copied)
         .padding(.horizontal, 12)
         .frame(height: 44)
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        Button("Copy Transcript", systemImage: "doc.on.doc", action: copyTranscript)
+            .disabled(!hasTranscript)
+        Menu("Export", systemImage: "square.and.arrow.up") {
+            ForEach(ExportFormat.allCases) { format in
+                Button(format.label) { export(format) }
+            }
+        }
+        .disabled(!hasTranscript)
+        Divider()
+        Button("Rename", systemImage: "pencil") { titleFocused = true }
+        if recording.status == .done || recording.status == .failed {
+            Button("Transcribe Again", systemImage: "arrow.clockwise") {
+                if let id = recording.id { library.requeue(id) }
+                transcriber.processQueue()
+            }
+        }
+        Button("Show Audio in Finder", systemImage: "folder") {
+            NSWorkspace.shared.activateFileViewerSelecting([library.audioURL(for: recording)])
+        }
+        Divider()
+        Button("Delete…", systemImage: "trash", role: .destructive) {
+            appState.pendingDeletion = recording.id
+        }
+    }
+
+    /// Title edits save as you type (nothing is lost if you click away); Esc restores the original.
+    private func titleEditing(_ event: TitleEditEvent) {
+        switch event {
+        case .began:
+            titleBeforeEditing = recording.title
+        case .changed:
+            let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let id = recording.id, !trimmed.isEmpty, trimmed != recording.title {
+                library.rename(id, to: trimmed)
+            }
+        case .cancelled:
+            titleDraft = titleBeforeEditing
+            if let id = recording.id { library.rename(id, to: titleBeforeEditing) }
+        case .ended:
+            titleDraft = recording.title
+        }
     }
 
     private var header: RecordingHeader {
         RecordingHeader(
             recording: recording,
+            title: $titleDraft,
+            isTitleFocused: $titleFocused,
+            onTitleEdit: titleEditing,
             wordCount: hasTranscript ? segments.reduce(0) { $0 + $1.text.split(separator: " ").count } : nil,
             speakerCount: speakers.showsSpeakers ? speakers.numbers.count : nil
         )
@@ -230,16 +292,40 @@ extension StatusMessage where Actions == EmptyView {
     }
 }
 
+enum TitleEditEvent {
+    case began, changed, cancelled, ended
+}
+
 struct RecordingHeader: View {
     let recording: Recording
+    @Binding var title: String
+    var isTitleFocused: FocusState<Bool>.Binding
+    let onTitleEdit: (TitleEditEvent) -> Void
     let wordCount: Int?
     let speakerCount: Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(recording.title)
+            // The title is always editable, like a document title: click, type, press Return.
+            TextField("Untitled", text: $title, axis: .vertical)
+                .textFieldStyle(.plain)
                 .font(Theme.titleFont)
-                .textSelection(.enabled)
+                .focused(isTitleFocused)
+                .onKeyPress(.return) {
+                    isTitleFocused.wrappedValue = false
+                    return .handled
+                }
+                .onExitCommand {
+                    onTitleEdit(.cancelled)
+                    isTitleFocused.wrappedValue = false
+                }
+                .onChange(of: title) {
+                    if isTitleFocused.wrappedValue { onTitleEdit(.changed) }
+                }
+                .onChange(of: isTitleFocused.wrappedValue) { _, focused in
+                    onTitleEdit(focused ? .began : .ended)
+                }
+                .help("Click to rename")
             Text(metadata)
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.secondaryText)

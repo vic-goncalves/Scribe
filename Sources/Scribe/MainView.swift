@@ -13,7 +13,7 @@ struct MainView: View {
     var body: some View {
         @Bindable var appState = appState
         HStack(spacing: 0) {
-            SidebarView(onImport: { appState.showImporter = true }, onDelete: delete)
+            SidebarView(onImport: { appState.showImporter = true })
                 .frame(width: 260)
             Rectangle()
                 .fill(Theme.border)
@@ -45,7 +45,17 @@ struct MainView: View {
             ModelPickerView()
         }
         .onDeleteCommand {
-            if let selection = appState.selection { delete(selection) }
+            appState.pendingDeletion = appState.selection
+        }
+        .confirmationDialog(
+            "Delete “\(appState.pendingDeletion.flatMap { library.recording(id: $0)?.title } ?? "")”?",
+            isPresented: Binding(get: { appState.pendingDeletion != nil }, set: { if !$0 { appState.pendingDeletion = nil } })
+        ) {
+            Button("Delete", role: .destructive) {
+                if let id = appState.pendingDeletion { delete(id) }
+            }
+        } message: {
+            Text("The transcript and Scribe's copy of the audio will be removed. The original file isn't affected.")
         }
     }
 
