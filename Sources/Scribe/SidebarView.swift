@@ -14,8 +14,16 @@ struct SidebarView: View {
     var body: some View {
         @Bindable var appState = appState
         VStack(alignment: .leading, spacing: 2) {
+            // Sits on the same line as the window's close/minimize/zoom buttons.
+            HStack {
+                Spacer()
+                AppearanceButton()
+            }
+            .frame(height: 32)
+            .padding(.top, 1)
+
             SearchField(text: $appState.searchText, prompt: "Search transcripts")
-                .padding(.top, 44)
+                .padding(.top, 11)
                 .padding(.bottom, 4)
 
             SidebarRow(icon: "plus", title: "New transcript", shortcut: "⌘N", action: onImport)
@@ -27,11 +35,8 @@ struct SidebarView: View {
                 recordingList
             }
 
-            HStack(spacing: 2) {
-                ModelSwitcherButton()
-                AppearanceButton()
-            }
-            .padding(.bottom, 10)
+            ModelSwitcherButton()
+                .padding(.bottom, 10)
         }
         .padding(.horizontal, 8)
         .background(Theme.sidebar)
@@ -366,11 +371,9 @@ private struct AppearanceButton: View {
             .labelsHidden()
         } label: {
             Image(systemName: appearance.icon)
-                .font(.system(size: 13))
-                .frame(width: 22, height: 30)
         }
         .menuStyle(.button)
-        .buttonStyle(GhostButtonStyle())
+        .buttonStyle(IconButtonStyle(size: 26))
         .menuIndicator(.hidden)
         .fixedSize()
         .help("Appearance: \(appearance.label)")

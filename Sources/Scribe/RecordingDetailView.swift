@@ -102,11 +102,9 @@ struct RecordingDetailView: View {
                 actions
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 14, weight: .medium))
-                    .frame(width: 22, height: 20)
             }
             .menuStyle(.button)
-            .buttonStyle(GhostButtonStyle())
+            .buttonStyle(IconButtonStyle())
             .menuIndicator(.hidden)
             .fixedSize()
             .help("More actions")
@@ -149,9 +147,11 @@ struct RecordingDetailView: View {
         case .began:
             titleBeforeEditing = recording.title
         case .changed:
+            // Clearing the title names the recording "Untitled"; the empty field shows that as a placeholder.
             let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let id = recording.id, !trimmed.isEmpty, trimmed != recording.title {
-                library.rename(id, to: trimmed)
+            let title = trimmed.isEmpty ? Recording.untitled : trimmed
+            if let id = recording.id, title != recording.title {
+                library.rename(id, to: title)
             }
         case .cancelled:
             titleDraft = titleBeforeEditing
@@ -307,7 +307,7 @@ struct RecordingHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             // The title is always editable, like a document title: click, type, press Return.
-            TextField("Untitled", text: $title, axis: .vertical)
+            TextField(Recording.untitled, text: $title, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(Theme.titleFont)
                 .focused(isTitleFocused)

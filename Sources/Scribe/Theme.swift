@@ -108,6 +108,25 @@ struct PrimaryButtonStyle: ButtonStyle {
     }
 }
 
+/// Square icon-only button with a hover highlight, for toolbar-style actions.
+struct IconButtonStyle: ButtonStyle {
+    var size: CGFloat = 28
+    @State private var isHovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(Theme.secondaryText)
+            .frame(width: size, height: size)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(configuration.isPressed ? Theme.selection : isHovered ? Theme.hover : .clear)
+            )
+            .contentShape(Rectangle())
+            .onHover { isHovered = $0 }
+    }
+}
+
 /// Quiet button for secondary actions: no chrome until hovered.
 struct GhostButtonStyle: ButtonStyle {
     @State private var isHovered = false

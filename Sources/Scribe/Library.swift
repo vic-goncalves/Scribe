@@ -31,6 +31,8 @@ struct Recording: Codable, Identifiable, Hashable, FetchableRecord, MutablePersi
     var errorMessage: String?
     var language: String?
 
+    static let untitled = "Untitled"
+
     mutating func didInsert(_ inserted: InsertionSuccess) {
         id = inserted.rowID
     }
