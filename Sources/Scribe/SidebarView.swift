@@ -396,7 +396,7 @@ private struct ModelSwitcherButton: View {
         switch transcriber.phase {
         case .loading: "Loading…"
         case .failed: "Unavailable. Click to fix."
-        default: "On-device · Private"
+        default: transcriber.speakersUnavailable ? "Speaker detection unavailable" : "On-device · Private"
         }
     }
 

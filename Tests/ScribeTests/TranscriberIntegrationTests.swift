@@ -100,6 +100,28 @@ final class TranscriberIntegrationTests: XCTestCase {
         XCTAssertEqual(speaker(saying: "announcement email"), daniel)
     }
 
+    func testDamagedSpeakerModelsAreDownloadedAgain() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SCRIBE_INTEGRATION"] == "1", "set SCRIBE_INTEGRATION=1")
+
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ScribeSpeakerRepair-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        // What an interrupted download leaves behind: the folder exists, but a model file is garbage.
+        let speakerFolder = root.appendingPathComponent("models/argmaxinc/speakerkit-coreml")
+        let segmenter = speakerFolder.appendingPathComponent("speaker_segmenter/pyannote-v3/W8A16/SpeakerSegmenter.mlmodelc")
+        try FileManager.default.createDirectory(at: segmenter, withIntermediateDirectories: true)
+        try Data("partial".utf8).write(to: segmenter.appendingPathComponent("coremldata.bin"))
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "ScribeSpeakerRepair-\(UUID().uuidString)"))
+        defaults.set(speakerFolder.path, forKey: "speakerModelFolder")
+
+        let transcriber = Transcriber(library: try Library(root: root), modelsDirectory: root, defaults: defaults)
+        await transcriber.prepareSpeakerModels()
+
+        XCTAssertFalse(transcriber.speakersUnavailable)
+        let repaired = try XCTUnwrap(defaults.string(forKey: "speakerModelFolder"))
+        let data = try Data(contentsOf: URL(fileURLWithPath: repaired).appendingPathComponent("speaker_segmenter/pyannote-v3/W8A16/SpeakerSegmenter.mlmodelc/coremldata.bin"))
+        XCTAssertNotEqual(data, Data("partial".utf8), "the damaged file was replaced by a fresh download")
+    }
+
     /// Speaks each turn with its voice and joins them with short pauses into one WAV file.
     private func synthesizeConversation(_ turns: [(voice: String, text: String)], to url: URL) throws -> URL {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

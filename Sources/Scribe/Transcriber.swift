@@ -62,6 +62,8 @@ final class Transcriber {
     private(set) var activeProgress: Double = 0
     /// True while the active recording is past transcription and being split into speakers.
     private(set) var isIdentifyingSpeakers = false
+    /// Set when speaker models couldn't be downloaded or loaded; transcripts are then saved without speakers.
+    private(set) var speakersUnavailable = false
     private(set) var currentModelId: String?
     /// Model id -> folder for every fully downloaded model.
     private(set) var downloadedModels: [String: String] = [:]
@@ -199,25 +201,40 @@ final class Transcriber {
 
     /// Loads SpeakerKit from its saved local folder. The first time, its models (~33 MB) are downloaded
     /// from Hugging Face and the folder is remembered, so speaker identification never needs the network again.
-    private func prepareSpeakerModels() async {
+    /// Models are only trusted once they actually load; a damaged folder (e.g. an interrupted download)
+    /// is deleted and downloaded again.
+    func prepareSpeakerModels() async {
         guard speakerKit == nil else { return }
-        let savedFolder = defaults.string(forKey: Self.speakerModelsKey).flatMap {
-            FileManager.default.fileExists(atPath: $0) ? $0 : nil
+        if let folder = defaults.string(forKey: Self.speakerModelsKey), let kit = await loadedSpeakerKit(folder: folder) {
+            speakerKit = kit
+            speakersUnavailable = false
+            return
         }
+        defaults.removeObject(forKey: Self.speakerModelsKey)
+        try? FileManager.default.removeItem(at: modelsDirectory.appendingPathComponent("models/argmaxinc/speakerkit-coreml"))
         do {
-            let config = PyannoteConfig(
-                downloadBase: modelsDirectory.path,
-                modelFolder: savedFolder,
-                download: true,
-                verbose: false
-            )
-            let kit = try await SpeakerKit(config)
-            if savedFolder == nil, let path = (kit.diarizer as? ModelManager)?.modelPath?.path {
+            let kit = try await SpeakerKit(PyannoteConfig(downloadBase: modelsDirectory.path, download: true, verbose: false))
+            try await kit.ensureModelsLoaded()
+            if let path = (kit.diarizer as? ModelManager)?.modelPath?.path {
                 defaults.set(path, forKey: Self.speakerModelsKey)
             }
             speakerKit = kit
+            speakersUnavailable = false
         } catch {
+            speakersUnavailable = true
             print("Speaker models unavailable, transcripts won't be split by speaker: \(error)")
+        }
+    }
+
+    private func loadedSpeakerKit(folder: String) async -> SpeakerKit? {
+        guard FileManager.default.fileExists(atPath: folder) else { return nil }
+        do {
+            let kit = try await SpeakerKit(PyannoteConfig(modelFolder: folder, download: false, verbose: false))
+            try await kit.ensureModelsLoaded()
+            return kit
+        } catch {
+            print("Saved speaker models failed to load, downloading again: \(error)")
+            return nil
         }
     }
 
