@@ -10,6 +10,16 @@ A Mac app that transcribes audio locally with OpenAI's Whisper (via [WhisperKit]
 - Copy, or export as .txt, .md, .docx or .srt.
 - Speech models (Fast / Balanced / Best) can be downloaded, switched and deleted from the model switcher at the bottom of the sidebar.
 
+## Install
+
+On an Apple Silicon Mac with macOS 15 or later, paste this into Terminal (it also updates an existing install):
+
+```sh
+curl -fsSL https://github.com/vic-goncalves/Scribe/releases/latest/download/Scribe.zip -o /tmp/Scribe.zip && rm -rf /Applications/Scribe.app && ditto -xk /tmp/Scribe.zip /Applications && open /Applications/Scribe.app
+```
+
+The app isn't notarized. Installing through Terminal like this avoids the "unidentified developer" block; if you download the zip in a browser instead, allow it under System Settings > Privacy & Security > Open Anyway.
+
 ## Requirements
 
 macOS 15+, Apple Silicon, Xcode 16+ (Swift 6 toolchain).
@@ -22,6 +32,8 @@ macOS 15+, Apple Silicon, Xcode 16+ (Swift 6 toolchain).
 ```
 
 The app is ad-hoc signed for local use (not notarized).
+
+To publish a release, bump `CFBundleShortVersionString` in `Resources/Info.plist`, commit, then run `./scripts/release.sh`.
 
 ## Tests
 
