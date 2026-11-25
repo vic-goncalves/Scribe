@@ -42,10 +42,20 @@ struct Segment: Codable, Identifiable, Hashable, FetchableRecord, MutablePersist
     var start: Double
     var end: Double
     var text: String
+    /// 1-based speaker number in order of first appearance; nil when speakers weren't identified.
+    var speaker: Int?
 
     mutating func didInsert(_ inserted: InsertionSuccess) {
         id = inserted.rowID
     }
+}
+
+/// A transcript segment produced by the transcriber, before it's stored.
+struct TranscribedSegment: Equatable {
+    var start: Double
+    var end: Double
+    var text: String
+    var speaker: Int?
 }
 
 struct SearchHit: Identifiable, Hashable {
@@ -119,6 +129,17 @@ final class Library {
                 t.column("text")
             }
         }
+        migrator.registerMigration("v2-speakers") { db in
+            try db.alter(table: "segment") { t in
+                t.add(column: "speaker", .integer)
+            }
+            try db.create(table: "speakerName") { t in
+                t.belongsTo("recording", onDelete: .cascade).notNull()
+                t.column("number", .integer).notNull()
+                t.column("name", .text).notNull()
+                t.primaryKey(["recordingId", "number"])
+            }
+        }
         return migrator
     }
 
@@ -188,16 +209,53 @@ final class Library {
         }
     }
 
-    func saveTranscript(for id: Int64, segments: [(start: Double, end: Double, text: String)], language: String?) {
+    func saveTranscript(for id: Int64, segments: [TranscribedSegment], language: String?) {
         write { db in
             try Segment.filter(Column("recordingId") == id).deleteAll(db)
+            // Speaker numbers are reassigned on every transcription, so old names no longer apply.
+            try db.execute(sql: "DELETE FROM speakerName WHERE recordingId = ?", arguments: [id])
             for item in segments {
-                var segment = Segment(recordingId: id, start: item.start, end: item.end, text: item.text)
+                var segment = Segment(recordingId: id, start: item.start, end: item.end, text: item.text, speaker: item.speaker)
                 try segment.insert(db)
             }
             try db.execute(
                 sql: "UPDATE recording SET status = 'done', errorMessage = NULL, language = ? WHERE id = ?",
                 arguments: [language, id]
+            )
+        }
+    }
+
+    // MARK: Speakers
+
+    /// Custom names by speaker number. Unnamed speakers display as "Speaker N".
+    func speakerNames(for recordingId: Int64) -> [Int: String] {
+        let rows = (try? db.read { db in
+            try Row.fetchAll(db, sql: "SELECT number, name FROM speakerName WHERE recordingId = ?", arguments: [recordingId])
+        }) ?? []
+        return Dictionary(uniqueKeysWithValues: rows.map { ($0["number"] as Int, $0["name"] as String) })
+    }
+
+    /// An empty name resets the speaker to "Speaker N".
+    func renameSpeaker(_ number: Int, in recordingId: Int64, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        write { db in
+            if trimmed.isEmpty {
+                try db.execute(sql: "DELETE FROM speakerName WHERE recordingId = ? AND number = ?", arguments: [recordingId, number])
+            } else {
+                try db.execute(
+                    sql: "INSERT OR REPLACE INTO speakerName (recordingId, number, name) VALUES (?, ?, ?)",
+                    arguments: [recordingId, number, trimmed]
+                )
+            }
+        }
+    }
+
+    /// Fixes a misattributed passage by moving its segments to another speaker.
+    func assignSpeaker(_ number: Int, toSegments segmentIds: [Int64]) {
+        write { db in
+            try db.execute(
+                sql: "UPDATE segment SET speaker = ? WHERE id IN (\(segmentIds.map { _ in "?" }.joined(separator: ",")))",
+                arguments: StatementArguments([number] + segmentIds)
             )
         }
     }

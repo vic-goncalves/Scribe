@@ -21,6 +21,20 @@ enum Theme {
     static let highlight = dynamic(light: 0xFBF3DB, dark: 0x4F4220)
     static let activeSegment = dynamic(light: 0xE7F3F8, dark: 0x1D3340)
 
+    /// Muted, distinguishable label colors (Notion's text palette), cycled by speaker number.
+    static func speakerColor(_ number: Int) -> Color {
+        let palette: [Color] = [
+            dynamic(light: 0x337EA9, dark: 0x5B97BD),
+            dynamic(light: 0xD9730D, dark: 0xDD8B42),
+            dynamic(light: 0x448361, dark: 0x5A9A78),
+            dynamic(light: 0x9065B0, dark: 0x9D7AB8),
+            dynamic(light: 0xC14C8A, dark: 0xC76A9C),
+            dynamic(light: 0x9F6B53, dark: 0xA77D68),
+            dynamic(light: 0xD44C47, dark: 0xDB6B66),
+        ]
+        return palette[(max(number, 1) - 1) % palette.count]
+    }
+
     static let titleFont = Font.system(size: 34, weight: .bold)
     static let bodyFont = Font.system(size: 15.5)
 

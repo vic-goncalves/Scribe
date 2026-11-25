@@ -21,7 +21,12 @@ struct RecordingDetailView: View {
     @Environment(AppState.self) private var appState
     @State private var segments: [Segment] = []
     @State private var paragraphs: [Paragraph] = []
+    @State private var speakerNames: [Int: String] = [:]
     @State private var copied = false
+    @State private var renamingSpeaker: Int?
+    @State private var speakerNameDraft = ""
+
+    private var speakers: SpeakerLabels { SpeakerLabels(segments: segments, names: speakerNames) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,10 +40,37 @@ struct RecordingDetailView: View {
             player.load(library.audioURL(for: recording))
         }
         .task(id: recording.status) {
-            guard let id = recording.id else { return }
-            segments = library.segments(for: id)
-            paragraphs = Paragraph.group(segments)
+            reloadTranscript()
         }
+        .alert("Rename Speaker", isPresented: Binding(get: { renamingSpeaker != nil }, set: { if !$0 { renamingSpeaker = nil } })) {
+            TextField("Name", text: $speakerNameDraft)
+            Button("Rename") {
+                if let number = renamingSpeaker, let id = recording.id {
+                    library.renameSpeaker(number, in: id, to: speakerNameDraft)
+                    reloadTranscript()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The new name is used everywhere this speaker appears in this recording.")
+        }
+    }
+
+    private func reloadTranscript() {
+        guard let id = recording.id else { return }
+        segments = library.segments(for: id)
+        paragraphs = Paragraph.group(segments)
+        speakerNames = library.speakerNames(for: id)
+    }
+
+    private func renameSpeaker(_ number: Int) {
+        speakerNameDraft = speakerNames[number] ?? ""
+        renamingSpeaker = number
+    }
+
+    private func assign(_ paragraph: Paragraph, to number: Int) {
+        library.assignSpeaker(number, toSegments: paragraph.segmentIds)
+        reloadTranscript()
     }
 
     private var actionBar: some View {
@@ -71,13 +103,24 @@ struct RecordingDetailView: View {
     }
 
     private var header: RecordingHeader {
-        RecordingHeader(recording: recording, wordCount: hasTranscript ? segments.reduce(0) { $0 + $1.text.split(separator: " ").count } : nil)
+        RecordingHeader(
+            recording: recording,
+            wordCount: hasTranscript ? segments.reduce(0) { $0 + $1.text.split(separator: " ").count } : nil,
+            speakerCount: speakers.showsSpeakers ? speakers.numbers.count : nil
+        )
     }
 
     @ViewBuilder
     private var content: some View {
         if recording.status == .done && !paragraphs.isEmpty {
-            TranscriptView(recordingId: recording.id ?? 0, paragraphs: paragraphs, header: header)
+            TranscriptView(
+                recordingId: recording.id ?? 0,
+                paragraphs: paragraphs,
+                speakers: speakers,
+                header: header,
+                onRenameSpeaker: renameSpeaker,
+                onAssign: assign
+            )
         } else {
             VStack(alignment: .leading, spacing: 0) {
                 header
@@ -132,7 +175,7 @@ struct RecordingDetailView: View {
     private func copyTranscript() {
         guard hasTranscript else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(TranscriptExporter.plainText(title: recording.title, paragraphs: paragraphs), forType: .string)
+        NSPasteboard.general.setString(TranscriptExporter.plainText(title: recording.title, paragraphs: paragraphs, speakers: speakers), forType: .string)
         copied = true
         Task {
             try? await Task.sleep(for: .seconds(1.5))
@@ -149,7 +192,7 @@ struct RecordingDetailView: View {
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            try TranscriptExporter.data(for: format, recording: recording, segments: segments).write(to: url)
+            try TranscriptExporter.data(for: format, recording: recording, segments: segments, speakerNames: speakerNames).write(to: url)
         } catch {
             NSAlert(error: error).runModal()
         }
@@ -190,6 +233,7 @@ extension StatusMessage where Actions == EmptyView {
 struct RecordingHeader: View {
     let recording: Recording
     let wordCount: Int?
+    let speakerCount: Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -213,6 +257,9 @@ struct RecordingHeader: View {
         if let language = recording.language, let name = Locale.current.localizedString(forLanguageCode: language) {
             parts.append(name)
         }
+        if let speakerCount {
+            parts.append("\(speakerCount) speakers")
+        }
         if let wordCount {
             parts.append("\(wordCount.formatted()) words")
         }
@@ -223,7 +270,10 @@ struct RecordingHeader: View {
 struct TranscriptView<Header: View>: View {
     let recordingId: Int64
     let paragraphs: [Paragraph]
+    let speakers: SpeakerLabels
     let header: Header
+    let onRenameSpeaker: (Int) -> Void
+    let onAssign: (Paragraph, Int) -> Void
 
     @Environment(Player.self) private var player
     @Environment(AppState.self) private var appState
@@ -239,8 +289,11 @@ struct TranscriptView<Header: View>: View {
                     ForEach(paragraphs) { paragraph in
                         ParagraphRow(
                             paragraph: paragraph,
+                            speakers: speakers,
                             activeSegmentId: activeSegmentId,
-                            flashedSegmentId: flashedSegmentId
+                            flashedSegmentId: flashedSegmentId,
+                            onRenameSpeaker: onRenameSpeaker,
+                            onAssign: onAssign
                         )
                         .id(paragraph.id)
                     }
@@ -300,8 +353,11 @@ private let paragraphSeekScheme = "scribe-seek"
 
 private struct ParagraphRow: View {
     let paragraph: Paragraph
+    let speakers: SpeakerLabels
     let activeSegmentId: Int64?
     let flashedSegmentId: Int64?
+    let onRenameSpeaker: (Int) -> Void
+    let onAssign: (Paragraph, Int) -> Void
 
     @Environment(Player.self) private var player
     @State private var isHovered = false
@@ -321,14 +377,41 @@ private struct ParagraphRow: View {
             .buttonStyle(.plain)
             .help("Play from \(formatTimestamp(paragraph.start))")
 
-            Text(attributedText)
-                .font(Theme.bodyFont)
-                .lineSpacing(6)
-                .tint(Theme.text)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 4) {
+                if let speaker = paragraph.speaker, speakers.showsSpeakers {
+                    speakerMenu(speaker)
+                }
+                Text(attributedText)
+                    .font(Theme.bodyFont)
+                    .lineSpacing(6)
+                    .tint(Theme.text)
+                    .textSelection(.enabled)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onHover { isHovered = $0 }
+    }
+
+    private func speakerMenu(_ speaker: Int) -> some View {
+        Menu {
+            Button("Rename “\(speakers.name(speaker))”…") { onRenameSpeaker(speaker) }
+            Divider()
+            Section("Move this paragraph to") {
+                ForEach(speakers.numbers.filter { $0 != speaker }, id: \.self) { other in
+                    Button(speakers.name(other)) { onAssign(paragraph, other) }
+                }
+                Button("New speaker") { onAssign(paragraph, (speakers.numbers.max() ?? 0) + 1) }
+            }
+        } label: {
+            Text(speakers.name(speaker))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.speakerColor(speaker))
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Rename this speaker, or move this paragraph to another speaker")
     }
 
     /// Each segment is a link to its start time, so clicking any sentence plays from there.

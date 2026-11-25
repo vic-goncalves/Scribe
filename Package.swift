@@ -13,6 +13,7 @@ let package = Package(
             name: "Scribe",
             dependencies: [
                 .product(name: "WhisperKit", package: "WhisperKit"),
+                .product(name: "SpeakerKit", package: "WhisperKit"),
                 .product(name: "GRDB", package: "GRDB.swift"),
             ],
             swiftSettings: [.swiftLanguageMode(.v5)]

@@ -47,7 +47,7 @@ final class LibraryTests: XCTestCase {
         let library = try Library(root: root)
         let id = try await importOne(into: library)
 
-        library.saveTranscript(for: id, segments: [(0, 2, "Hello there."), (2, 4, "General Kenobi.")], language: "en")
+        library.saveTranscript(for: id, segments: [.init(start: 0, end: 2, text: "Hello there."), .init(start: 2, end: 4, text: "General Kenobi.")], language: "en")
 
         XCTAssertEqual(library.recording(id: id)?.status, .done)
         XCTAssertEqual(library.recording(id: id)?.language, "en")
@@ -57,9 +57,9 @@ final class LibraryTests: XCTestCase {
     func testRetranscribingReplacesOldSegments() async throws {
         let library = try Library(root: root)
         let id = try await importOne(into: library)
-        library.saveTranscript(for: id, segments: [(0, 2, "first pass")], language: "en")
+        library.saveTranscript(for: id, segments: [.init(start: 0, end: 2, text: "first pass")], language: "en")
 
-        library.saveTranscript(for: id, segments: [(0, 2, "second pass")], language: "en")
+        library.saveTranscript(for: id, segments: [.init(start: 0, end: 2, text: "second pass")], language: "en")
 
         XCTAssertEqual(library.segments(for: id).map(\.text), ["second pass"])
         XCTAssertTrue(library.search("first pass").isEmpty, "search index drops replaced segments")
@@ -69,9 +69,9 @@ final class LibraryTests: XCTestCase {
         let library = try Library(root: root)
         let id = try await importOne(into: library)
         library.saveTranscript(for: id, segments: [
-            (0, 5, "We should revisit the quarterly budget before Friday."),
-            (5, 9, "The transcription quality was surprisingly good."),
-            (9, 12, "Let's grab lunch."),
+            .init(start: 0, end: 5, text: "We should revisit the quarterly budget before Friday."),
+            .init(start: 5, end: 9, text: "The transcription quality was surprisingly good."),
+            .init(start: 9, end: 12, text: "Let's grab lunch."),
         ], language: "en")
 
         XCTAssertEqual(library.search("budget").map(\.segment.text), ["We should revisit the quarterly budget before Friday."])
@@ -86,9 +86,9 @@ final class LibraryTests: XCTestCase {
         let library = try Library(root: root)
         let id = try await importOne(into: library)
         library.saveTranscript(for: id, segments: [
-            (0, 3, "The plannng doc is late."),
-            (3, 6, "Planning starts Monday."),
-            (6, 9, "Ok so we go."),
+            .init(start: 0, end: 3, text: "The plannng doc is late."),
+            .init(start: 3, end: 6, text: "Planning starts Monday."),
+            .init(start: 6, end: 9, text: "Ok so we go."),
         ], language: "en")
 
         XCTAssertEqual(library.search("planning").map(\.segment.start), [3, 0])
@@ -108,7 +108,7 @@ final class LibraryTests: XCTestCase {
         let library = try Library(root: root)
         let id = try await importOne(into: library)
         library.rename(id, to: "  Design review  ")
-        library.saveTranscript(for: id, segments: [(0, 3, "Ship it.")], language: "en")
+        library.saveTranscript(for: id, segments: [.init(start: 0, end: 3, text: "Ship it.")], language: "en")
 
         XCTAssertEqual(library.search("ship").first?.recordingTitle, "Design review")
     }
@@ -117,7 +117,7 @@ final class LibraryTests: XCTestCase {
         let library = try Library(root: root)
         let id = try await importOne(into: library)
         let recording = try XCTUnwrap(library.recording(id: id))
-        library.saveTranscript(for: id, segments: [(0, 3, "Confidential roadmap")], language: "en")
+        library.saveTranscript(for: id, segments: [.init(start: 0, end: 3, text: "Confidential roadmap")], language: "en")
 
         library.delete(id)
 

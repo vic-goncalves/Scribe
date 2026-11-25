@@ -63,12 +63,12 @@ final class TranscriptFormattingTests: XCTestCase {
 
     func testCleanSegmentsDropsAnnotationsAndClampsToDuration() {
         let cleaned = Transcriber.cleanSegments([
-            (5, 9, " second "),
-            (0, 4, "First (laughs) part."),
-            (9, 10, "[BLANK_AUDIO]"),
-            (10, 11, "(music)"),
-            (11, 12, " "),
-            (12, 20, "Last words."),
+            TranscribedSegment(start: 5, end: 9, text: " second "),
+            TranscribedSegment(start: 0, end: 4, text: "First (laughs) part."),
+            TranscribedSegment(start: 9, end: 10, text: "[BLANK_AUDIO]"),
+            TranscribedSegment(start: 10, end: 11, text: "(music)"),
+            TranscribedSegment(start: 11, end: 12, text: " "),
+            TranscribedSegment(start: 12, end: 20, text: " - Last words."),
         ], duration: 15)
         XCTAssertEqual(cleaned.map(\.text), ["First (laughs) part.", "second", "Last words."])
         XCTAssertEqual(cleaned.last?.end, 15)
